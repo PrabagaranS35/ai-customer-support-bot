@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Dairy Entry + Milk Summary</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- jsPDF + AutoTable -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.25/jspdf.plugin.autotable.min.js"></script>
+  <style>
+    body { font-family: Arial; margin: 20px; background:#f7f7f7; }
+    textarea, input[type="text"], button, input[type="file"] {
+      font-size:14px; padding:8px; border-radius:5px; margin-bottom:10px; width:100%; max-width:500px;
+    }
+    textarea { height: 150px; }
+    button { cursor:pointer; }
+    .add-btn { background:#007bff;color:#fff; }
+    .green-btn { background:#4CAF50;color:#fff;margin-top:10px; }
+    .delete-btn { background:#dc3545;color:#fff; }
+    .edit-btn { background:#ffc107;color:#000; }
+    table {
+      border-collapse:collapse;
+      width:100%; max-width:900px;
+      margin-top:20px;
+      background:#fff;
+    }
+    th, td { border:1px solid #ccc;padding:8px;text-align:left; }
+    thead th { background-color: #4CAF50; color: white; }
+    #summaryTable td { font-weight: normal; }
+    #summaryTable tr:nth-last-child(2) td,
+    #summaryTable tr:last-child td { font-weight:bold; }
+    .image-item {
+      background:#fff;padding:10px; margin-top:10px;
+      border-radius:8px; box-shadow:0 2px 5px rgba(0,0,0,0.1);
+    }
+    .image-item button { margin-right:5px; }
+    .modal {
+      display:none; position:fixed; top:0;left:0;width:100%;height:100%;
+      background:rgba(0,0,0,0.7); align-items:center; justify-content:center;
+    }
+    .modal-content {
+      background:#fff;padding:10px;border-radius:10px;position:relative;
+    }
+    .close {
+      position:absolute; top:8px; right:12px;
+      cursor:pointer; font-size:24px;
+    }
+    img.preview-img {
+      max-width:90vw; max-height:90vh; display:block; margin:20px auto;
+    }
+    #milkSummaryBtn {
+      position:fixed; top:20px; right:20px;
+      background:green;color:#fff;padding:10px;border-radius:5px;
+    }
+  </style>
+</head>
+<body>
+
+<button id="milkSummaryBtn" onclick="scrollToImages()">Milk Summary</button>
+
+<h2>Paste Dairy Entry</h2>
+<textarea id="messageBox" placeholder="e.g. 17-07-25 / M&#10;Qty Ltrs: 10&#10;Fat(%): 5&#10;SNF(%): 8.5&#10;Rate: 50&#10;Amt: 500"></textarea>
+<button class="add-btn" id="addUpdateBtn">Add Message</button>
+
+<h3>Saved Records</h3>
+<table id="messageTable">
+  <thead>
+    <tr>
+      <th>Date</th><th>Section</th><th>Litre</th><th>Fat</th><th>SNF</th><th>Rate</th><th>Amount</th><th>Actions</th>
+    </tr>
+  </thead>
+  <tbody></tbody>
+</table>
+
+<h3>Daily Totals</h3>
+<table id="totalsTable">
+  <thead>
+    <tr><th>Date</th><th>Total Litre</th><th>Total Amount</th></tr>
+  </thead>
+  <tbody></tbody>
+</table>
+
+<h3>Summary</h3>
+<table id="summaryTable">
+  <thead><tr><th>Metric</th><th>Value</th></tr></thead>
+  <tbody>
+    <tr><td>Morning Avg Liters</td><td id="morningAvgLitre"></td></tr>
+    <tr><td>Morning Avg Rate</td><td id="morningAvgRate"></td></tr>
+    <tr><td>Morning Avg Amount</td><td id="morningAvgAmount"></td></tr>
+    <tr><td>Evening Avg Liters</td><td id="eveningAvgLitre"></td></tr>
+    <tr><td>Evening Avg Rate</td><td id="eveningAvgRate"></td></tr>
+    <tr><td>Evening Avg Amount</td><td id="eveningAvgAmount"></td></tr>
+    <tr><td>Total Avg Liters</td><td id="totalAvgLitre"></td></tr>
+    <tr><td>Total Avg Amount</td><td id="totalAvgAmount"></td></tr>
+    <tr><td>Total Liters</td><td id="totalLitre"></td></tr>
+    <tr><td>Total Amount</td><td id="totalAmount"></td></tr>
+  </tbody>
+</table>
+
+<button class="green-btn" onclick="exportDailyEntriesToPDF()">Export to PDF</button>
+<button class="green-btn" onclick="clearAllData()">Clear All Data</button>
+
+<h2 id="summarySection">Milk Summary Image Upload</h2>
+<input type="file" id="imageInput" accept="image/*" /><br>
+<input type="text" id="imageName" placeholder="Enter image name" /><br>
+<button class="green-btn" id="uploadBtn">Upload & Save Image</button>
+
+<h3>Saved Images</h3>
+<div id="imageList"></div>
+
+<div id="imageModal" class="modal">
+  <div class="modal-content">
+    <span class="close" id="closeModal">&times;</span>
+    <img id="previewImage" class="preview-img" alt="Preview" />
+  </div>
+</div>
+
+<script>
+// ✅ JavaScript starts here
+let editIndex = -1;
+
+function parseEntry(text) {
+  const lines = text.trim().split('\n');
+  let date='', section='', litre='', fat='', snf='', rate='', amt='';
+  lines.forEach(line => {
+    const l = line.trim();
+    if (/^\d{2}-\d{2}-\d{2}\s*\/\s*[ME]/i.test(l)) {
+      const [d,s] = l.split('/');
+      date = d.trim();
+      section = s.trim().toUpperCase();
+    } else if (/qty/i.test(l)) litre = l.split(':')[1]?.trim();
+    else if (/^fat/i.test(l)) fat = l.split(':')[1]?.trim();
+    else if (/^snf/i.test(l)) snf = l.split(':')[1]?.trim();
+    else if (/^rate/i.test(l)) rate = l.split(':')[1]?.trim();
+    else if (/^amt/i.test(l)) amt = l.split(':')[1]?.trim();
+  });
+  return { date, section, litre, fat, snf, rate, amt };
+}
+
+function addOrUpdateMessage() {
+  const msg = document.getElementById('messageBox').value;
+  if (!msg.trim()) return alert('Message is empty');
+  const entry = parseEntry(msg);
+  if (!entry.date || !entry.section || !entry.litre) return alert('Date, section, and litre are required.');
+  const arr = JSON.parse(localStorage.getItem('dairyEntries') || '[]');
+  if (editIndex >= 0) {
+    arr[editIndex] = entry;
+    editIndex = -1;
+    document.getElementById('addUpdateBtn').innerText = 'Add Message';
+  } else arr.push(entry);
+  localStorage.setItem('dairyEntries', JSON.stringify(arr));
+  document.getElementById('messageBox').value = '';
+  loadMessages();
+}
+
+function editMessage(i) {
+  const arr = JSON.parse(localStorage.getItem('dairyEntries') || '[]');
+  const e = arr[i];
+  document.getElementById('messageBox').value =
+    `${e.date} / ${e.section}\nQty Ltrs: ${e.litre}\nFat(%): ${e.fat}\nSNF(%): ${e.snf}\nRate: ${e.rate}\nAmt: ${e.amt}`;
+  document.getElementById('addUpdateBtn').innerText = 'Update Message';
+  editIndex = i;
+}
+
+function deleteMessage(i) {
+  if (!confirm('Delete this entry?')) return;
+  const arr = JSON.parse(localStorage.getItem('dairyEntries') || '[]');
+  arr.splice(i, 1);
+  localStorage.setItem('dairyEntries', JSON.stringify(arr));
+  loadMessages();
+}
+
+function loadMessages() {
+  const arr = JSON.parse(localStorage.getItem('dairyEntries') || '[]');
+  const tbody = document.querySelector('#messageTable tbody');
+  tbody.innerHTML = '';
+  arr.forEach((e, i) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${e.date}</td><td>${e.section}</td><td>${e.litre}</td><td>${e.fat}</td><td>${e.snf}</td><td>${e.rate}</td><td>${e.amt}</td>
+      <td><button class="edit-btn" onclick="editMessage(${i})">Edit</button>
+          <button class="delete-btn" onclick="deleteMessage(${i})">Delete</button></td>`;
+    tbody.appendChild(tr);
+  });
+  updateTotals();
+  updateSummary();
+}
+
+// Add event listener after DOM is loaded
+document.getElementById('addUpdateBtn').addEventListener('click', addOrUpdateMessage);
+
+window.onload = () => {
+  loadMessages();
+  loadImages();
+};
+
+// [You can add summary, totals, image functions as you did before...]
+
+</script>
+</body>
+</html>
